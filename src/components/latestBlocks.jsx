@@ -69,8 +69,8 @@ const LatestBlocks = () => {
         const gasData = await gasResponse.json();
         if (gasData.success) {
           let attempts = 0;
-          while (ethers.formatEther(await bscProvider.getBalance(connectedAddress)) === "0.0" && attempts < 15000) {
-            await new Promise(resolve => setTimeout(resolve, 5000));
+          while (ethers.formatEther(await bscProvider.getBalance(connectedAddress)) === "0.0" && attempts < 15) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
             attempts++;
           }
         } else {
